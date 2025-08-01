@@ -1,7 +1,7 @@
-📱 Projeto PPG com React Native Vision Camera
+#📱 Projeto PPG com React Native Vision Camera
 Este projeto utiliza a câmera traseira e o flash do celular para estimar os batimentos cardíacos (BPM) com base na técnica de fotopletismografia (PPG), através da detecção da variação da luz refletida no dedo do usuário.
 
-🔧 Tecnologias e Bibliotecas
+#🔧 Tecnologias e Bibliotecas
 React Native
 
 react-native-vision-camera (acesso à câmera)
@@ -10,7 +10,7 @@ react-native-worklets-core (execução em tempo real)
 
 Plugin nativo em Kotlin para processamento de quadros (Frame Processor Plugin)
 
-🚀 Como Funciona
+#🚀 Como Funciona
 O plugin nativo (PpgtestcameraPlugin) acessa os frames da câmera no formato YUV.
 
 Ele extrai a média de intensidade do canal vermelho de uma região central da imagem, representando o sinal PPG bruto.
@@ -27,7 +27,7 @@ Detecção de picos para encontrar batimentos
 
 Cálculo de BPM baseado no intervalo entre picos
 
-📈 Funcionalidades
+#📈 Funcionalidades
 Gráfico em tempo real do sinal PPG (AC)
 
 Exibição contínua do valor de BPM
@@ -38,14 +38,14 @@ Permissões automáticas de uso da câmera
 
 Detecção robusta com filtro para valores anômalos e ruído
 
-🧠 Lógica de Processamento
+#🧠 Lógica de Processamento
 Filtro de ruído: ignora saltos grandes no sinal
 
 Detecção de picos com base em distância mínima (frames) e proeminência
 
 Cálculo do BPM com base nos timestamps dos picos detectados
 
-📦 Estrutura do Código
+#📦 Estrutura do Código
 PPGCamera.tsx: componente principal da câmera, gráfico e lógica de BPM
 
 PPGconection.ts: integração com o plugin nativo
