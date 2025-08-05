@@ -94,10 +94,27 @@ export default function PPGCamera() {
         }
     }, [])
 
+    function bandpassFilter(data: number[], lowCutoff: number, highCutoff: number): number[] {
+        // Esta é uma implementação simplificada usando médias móveis
 
-    function movingAverage(data: number[], windowSize: number = 1) {
-        const result = [];
+        // Filtro Passa-Baixa (remove altas frequências)
+        const lowPassFiltered = movingAverage(data, lowCutoff);
+
+        // Filtro Passa-Alta (remove baixas frequências)
+        const highPassFiltered = movingAverage(data, highCutoff);
+
+        // O sinal final é o resultado do passa-baixa menos o passa-alta
+        const bandPassFiltered = lowPassFiltered.map((value, index) => {
+            return value - highPassFiltered[index];
+        });
+
+        return bandPassFiltered;
+    }
+
+    function movingAverage(data: number[], windowSize: number): number[] {
+        const result: number[] = [];
         for (let i = 0; i < data.length; i++) {
+            // Para os primeiros elementos, a janela é menor
             const start = Math.max(0, i - windowSize + 1);
             const window = data.slice(start, i + 1);
             const avg = window.reduce((a, b) => a + b, 0) / window.length;
@@ -176,7 +193,7 @@ export default function PPGCamera() {
         const times = data.map((d) => d.time);
 
         // 1. Filtragem: Aplica uma média móvel para suavizar o ruído
-        const filteredValues = movingAverage(values, 5); // Janela pequena para suavizar
+        const filteredValues = bandpassFilter(values, 2, 10);
         // Calcule o desvio padrão do sinal filtrado
         const signalStdDev = getStandardDeviation(filteredValues);
 
@@ -187,8 +204,7 @@ export default function PPGCamera() {
         // Use o desvio padrão para definir a proeminência dinamicamente!
         // Um bom ponto de partida é usar o próprio desvio padrão como limiar.
         // Você pode multiplicar por um fator (ex: 1.5) se precisar de mais seletividade.
-        const minPeakProminence = signalStdDev;
-
+        const minPeakProminence = signalStdDev * 1.2;
         const peakIndices = detectPeaks(filteredValues, minPeakDistance, minPeakProminence);
 
         if (peakIndices.length < 2) {
@@ -232,7 +248,20 @@ export default function PPGCamera() {
                 <Text style={{ fontSize: 24, textAlign: 'center', width: '100%' }}>
                     {isFingerDetected ? (bpm ?? 'Analisando...') : 'Posicione o dedo na câmera'}
                 </Text>
-                <Text style={{ fontSize: 16 }}>Red: {data.length > 0 ? data[data.length - 1].value.toFixed(2) : '...'}</Text>
+                <View style={{
+                    backgroundColor:
+                        data.length > 0
+                            ? data[data.length - 1].value >= 0
+                                ? 'red'
+                                : 'green'
+                            : 'transparent',
+                    padding: 8,
+                    borderRadius: 5,
+                }}>
+                    <Text style={{ fontSize: 16, color: 'white' }}>
+                        Red: {data.length > 0 ? data[data.length - 1].value.toFixed(2) : '...'}
+                    </Text>
+                </View>
             </View>
         </View>
     );

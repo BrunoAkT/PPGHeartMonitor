@@ -9,6 +9,10 @@ import java.util.LinkedList
 
 class PpgtestcameraPlugin(proxy: VisionCameraProxy, options: Map<String, Any>?) : FrameProcessorPlugin() {
 
+    // JANELA DE SUAVIZAÇÃO: Um pequeno buffer para suavizar o sinal bruto
+    private val smoothingHistory = LinkedList<Double>()
+    private val smoothingSize = 3 // Média dos últimos 3 frames. Ajustável.
+
     // Usaremos uma LinkedList para manter um histórico dos valores e calcular a média (DC)
     private val signalHistory = LinkedList<Double>()
     private val historySize = 50 // Tamanho da janela para calcular a média móvel (DC)
@@ -55,31 +59,31 @@ class PpgtestcameraPlugin(proxy: VisionCameraProxy, options: Map<String, Any>?) 
             }
         }
 
-        if (count == 0) return null
+                if (count == 0) return null
+        val rawAvgRed = sumRed / count
 
-        val currentAvgRed = sumRed / count // Este é o nosso sinal bruto (AC + DC)
+        // --- NOVO: PASSO DE SUAVIZAÇÃO ---
+        smoothingHistory.add(rawAvgRed)
+        if (smoothingHistory.size > smoothingSize) {
+            smoothingHistory.removeFirst()
+        }
+        // Use a média suavizada como o valor atual
+        val currentAvgRed = smoothingHistory.average()
+        // --- FIM DO PASSO DE SUAVIZAÇÃO ---
+        
 
-        // --- LÓGICA DE NORMALIZAÇÃO AC/DC ---
-        // Adiciona o valor atual ao histórico
+        // --- LÓGICA DE NORMALIZAÇÃO AC/DC (com o valor já suavizado) ---
         signalHistory.add(currentAvgRed)
-        // Mantém o histórico com um tamanho fixo
         if (signalHistory.size > historySize) {
             signalHistory.removeFirst()
         }
-
-        // Calcula a média do histórico (Componente DC)
         val dcComponent = signalHistory.average()
-
-        if (dcComponent == 0.0) return null // Evita divisão por zero no início
-
-        // Normaliza o sinal para obter o componente AC
-        // O resultado será um valor pequeno que oscila em torno de 0
+        if (dcComponent == 0.0) return null
         val acComponent = currentAvgRed / dcComponent - 1
 
-        // Crie um mapa para retornar ambos os valores
         val result = mapOf(
             "ac" to acComponent,
-            "dc" to currentAvgRed // Ou dcComponent, mas o vermelho bruto é mais direto
+            "dc" to currentAvgRed
         )
         return result
     }
