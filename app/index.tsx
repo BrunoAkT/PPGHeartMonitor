@@ -2,7 +2,7 @@ import NoCameraDeviceError from '@/components/NoCameraDeviceError';
 import PermissionsPage from '@/components/Permission';
 import { Ppgtest } from '@/components/PPGconection';
 import { RealTimeGraph } from '@/components/RealtimeGraph';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Button } from 'react-native';
 import { Camera, useCameraDevice, useCameraFormat, useCameraPermission, useFrameProcessor } from 'react-native-vision-camera';
 import { Worklets } from 'react-native-worklets-core';
@@ -11,7 +11,7 @@ let lastValidValue = 0
 
 export default function PPGCamera() {
     const device = useCameraDevice('back');
-    const [torch, setTorch] = useState<'on' | 'off'>('on');
+    const [torch, setTorch] = useState<'on' | 'off'>('off');
     const { hasPermission } = useCameraPermission();
     const format = useCameraFormat(device, [
         { videoResolution: 'auto' },
@@ -24,27 +24,73 @@ export default function PPGCamera() {
 
     const [data, setData] = useState<{ time: number; value: number }[]>([])
 
-    const savePPGValue = (value: number) => {
-        // Ignora valores não numéricos ou saltos muito grandes
-        // O valor do salto (0.5 aqui) é um limiar que você pode ajustar.
-        // Se a variação for maior que 50% em um único frame, é provavelmente um artefato.
-        if (typeof value !== 'number' || !isFinite(value) || Math.abs(value - lastValidValue) > 0.5) {
-            console.log(`Valor ignorado (salto grande): ${value}`);
-            return; // Não adiciona o valor ao array
+    const [isFingerDetected, setIsFingerDetected] = useState(false);
+    const [isCalibrated, setIsCalibrated] = useState(false);
+    const [calibrationData, setCalibrationData] = useState<number[]>([]);
+
+    const isFingerDetectedRef = useRef(isFingerDetected);
+    const isCalibratedRef = useRef(isCalibrated);
+
+    useEffect(() => {
+        isFingerDetectedRef.current = isFingerDetected;
+        isCalibratedRef.current = isCalibrated;
+    }, [isFingerDetected, isCalibrated]);
+
+    const savePPGValue = (result: { ac: number, dc: number }) => {
+        // 1. Portão de Qualidade: o dedo está na câmera?
+        if (result.dc < 180) {
+            if (isFingerDetectedRef.current) { // Apenas reseta se estava detectado antes
+                setIsFingerDetected(false);
+                setIsCalibrated(false);
+                setCalibrationData([]);
+                setData([]);
+                setBpm(null);
+            }
+            return;
         }
-        setValores(value)
-        lastValidValue = value; // Atualiza o último valor válido
-        const timestamp = Date.now();
-        setData((prev) => [...prev.slice(-300), { time: timestamp, value }]);
-    }
-    const myFunctionJS = Worklets.createRunOnJS(savePPGValue)
+
+        if (!isFingerDetectedRef.current) {
+            setIsFingerDetected(true);
+        }
+
+        // 2. Fase de Calibração
+        if (isFingerDetectedRef.current && !isCalibratedRef.current) {
+            // Usando a forma funcional para garantir que estamos adicionando ao array mais recente
+            setCalibrationData(prevCalibrationData => {
+                const newCalibrationData = [...prevCalibrationData, result.ac];
+
+                console.log(`Calibrando... ${newCalibrationData.length}/90`);
+
+                // A lógica de finalização de calibração vai aqui dentro
+                if (newCalibrationData.length >= 90) {
+                    console.log("Calibração concluída! Iniciando medição.");
+                    setIsCalibrated(true);
+                    // Prepara para a próxima medição limpando os dados de calibração
+                    return [];
+                }
+
+                // Continua a calibração retornando o novo array
+                return newCalibrationData;
+            });
+            return; // Sai da função durante a calibração
+        }
+
+        // 3. Fase de Medição
+        if (isCalibratedRef.current) {
+            const timestamp = Date.now();
+            setData((prev) => [...prev.slice(-300), { time: timestamp, value: result.ac }]);
+            setValores(result.ac);
+        }
+    };
+    const myFunctionJS = Worklets.createRunOnJS(savePPGValue);
 
     const frameProcessor = useFrameProcessor((frame) => {
         'worklet'
         const heart = Ppgtest(frame)
-        if (typeof heart === 'number' && isFinite(heart)) {
+        if (heart && typeof heart.ac === 'number' && typeof heart.dc === 'number') {
             myFunctionJS(heart)
-            console.log(heart)
+            //console.log(heart)
+
         }
     }, [])
 
@@ -110,6 +156,14 @@ export default function PPGCamera() {
 
         return 60000 / avgInterval; // ms -> bpm
     }
+    // Função para calcular desvio padrão
+    function getStandardDeviation(array: number[]): number {
+        const n = array.length;
+        if (n === 0) return 0;
+        const mean = array.reduce((a, b) => a + b) / n;
+        const variance = array.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
+        return Math.sqrt(variance);
+    }
     useEffect(() => {
         // Processar apenas quando tivermos dados suficientes (ex: 5 segundos de dados a 30 FPS)
         const MIN_SAMPLES = 150;
@@ -122,17 +176,23 @@ export default function PPGCamera() {
         const times = data.map((d) => d.time);
 
         // 1. Filtragem: Aplica uma média móvel para suavizar o ruído
-        const filteredValues = movingAverage(values, 3); // Janela pequena para suavizar
+        const filteredValues = movingAverage(values, 5); // Janela pequena para suavizar
+        // Calcule o desvio padrão do sinal filtrado
+        const signalStdDev = getStandardDeviation(filteredValues);
 
         // 2. Detecção de Picos
         const fps = 30; // O FPS que você configurou na câmera
         // Distância mínima: 40 bpm -> 1.5s/batida -> 1.5*30 = 45 frames
         const minPeakDistance = fps * (60 / 200); // Distância para 200 bpm (máximo)
-        const minPeakProminence = 0.004; // Ajuste este valor! Dependerá da amplitude do seu sinal AC. Comece baixo.
+        // Use o desvio padrão para definir a proeminência dinamicamente!
+        // Um bom ponto de partida é usar o próprio desvio padrão como limiar.
+        // Você pode multiplicar por um fator (ex: 1.5) se precisar de mais seletividade.
+        const minPeakProminence = signalStdDev;
 
         const peakIndices = detectPeaks(filteredValues, minPeakDistance, minPeakProminence);
 
         if (peakIndices.length < 2) {
+            console.log('Não há picos suficientes para calcular')
             setBpm(null); // Não há picos suficientes para calcular
             return;
         }
@@ -170,7 +230,7 @@ export default function PPGCamera() {
                     <RealTimeGraph dataPoint={valores} />
                 </View>
                 <Text style={{ fontSize: 24, textAlign: 'center', width: '100%' }}>
-                    BPM: {bpm ?? 'Detectando...'}
+                    {isFingerDetected ? (bpm ?? 'Analisando...') : 'Posicione o dedo na câmera'}
                 </Text>
                 <Text style={{ fontSize: 16 }}>Red: {data.length > 0 ? data[data.length - 1].value.toFixed(2) : '...'}</Text>
             </View>

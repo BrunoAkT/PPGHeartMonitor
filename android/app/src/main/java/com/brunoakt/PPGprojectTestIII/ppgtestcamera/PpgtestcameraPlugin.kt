@@ -76,8 +76,11 @@ class PpgtestcameraPlugin(proxy: VisionCameraProxy, options: Map<String, Any>?) 
         // O resultado será um valor pequeno que oscila em torno de 0
         val acComponent = currentAvgRed / dcComponent - 1
 
-        Log.d("PPG", "AC Component: $acComponent")
-
-        return acComponent // Retorne o componente AC normalizado!
+        // Crie um mapa para retornar ambos os valores
+        val result = mapOf(
+            "ac" to acComponent,
+            "dc" to currentAvgRed // Ou dcComponent, mas o vermelho bruto é mais direto
+        )
+        return result
     }
 }
